@@ -12,26 +12,34 @@ use std::sync::Arc;
 
 /// 为我们的“具体数据库”实现 analyzer 的“抽象契约”
 impl AnalyzerDb for CompilationContext {
-    /// 按需获取 AST
-    fn ast(&self, file_id: FileId) -> Arc<ast::Module> {
-        // 1. 先检查缓存中是否已有
-        if let Some(ast) = self.ast_cache.borrow().get(&file_id) {
-            return ast.clone();
+    /// 按需获取 AST。这是我们编译器的核心查询之一。
+    fn ast(&self, file_id: FileId) -> (Arc<Ast>, AstId<AstModule>) {
+        // 1. 先以只读方式检查缓存中是否已有
+        if let Some(cached) = self.ast_cache.borrow().get(&file_id) {
+            return cached.clone(); // clone() 对 Arc 和 AstId 都是廉价的
         }
 
-        // 2. 如果没有，就从 SourceManager 获取源码
+        // --- 如果缓存未命中，则执行完整的解析流程 ---
+
+        // 2. 从 SourceManager 获取源码
         let source_text = self.source_manager.borrow().source_text(file_id);
         
-        // 3. 运行 Lexer 和 Parser
+        // 3. 创建一个全新的、空的 Ast 仓库
+        let mut ast_arena = Ast::new();
+        
+        // 4. 运行 Lexer 和 Parser，将结果填充到 ast_arena 中
         let lexer = Lexer::new(&source_text, file_id, &self.diagnostics);
-        let mut parser = Parser::new(lexer, &self.diagnostics);
-        let ast = parser.parse();
+        let mut parser = Parser::new(lexer, &self.diagnostics, &mut ast_arena);
+        let module_id = parser.parse(); // parse() 返回 AstId<Module>
         
-        // 4. 将新生成的 AST 存入缓存并返回
-        let arc_ast = Arc::new(ast);
-        self.ast_cache.borrow_mut().insert(file_id, arc_ast.clone());
+        // 5. 将填充完毕的 ast_arena 包装起来，准备存入缓存
+        let arc_ast = Arc::new(ast_arena);
+        let result = (arc_ast, module_id);
+
+        // 6. 将新生成的解析结果存入缓存
+        self.ast_cache.borrow_mut().insert(file_id, result.clone());
         
-        arc_ast
+        result
     }
 
     /// 解析模块路径
@@ -62,5 +70,10 @@ impl AnalyzerDb for CompilationContext {
     fn intern_string(&self, s: &str) -> Symbol {
         // 通过 RefCell 的 borrow_mut() 获取可变借用，并调用 interner 的方法
         self.interner.borrow_mut().intern(s)
+    }
+
+    // 访问报错模块
+    fn diagnostics(&self) -> &DiagnosticsEngine {
+        &self.diagnostics
     }
 }

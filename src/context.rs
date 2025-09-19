@@ -16,8 +16,8 @@ pub struct CompilationContext {
     pub source_manager: RefCell<SourceManager>,
 
     // AST 缓存：按需解析，并将结果缓存起来
-    // 使用 RefCell 提供内部可变性，因为 ast() 查询方法是 &self
-    pub ast_cache: RefCell<HashMap<FileId, Arc<ast::Module>>>,
+    // 缓存现在存储解析一个文件的完整结果：(AST仓库, 模块根节点ID)
+    pub ast_cache: RefCell<HashMap<FileId, (Arc<ast::Ast>, ast::AstId<ast::Module>)>>,
 }
 
 impl CompilationContext {
